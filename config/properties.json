@@ -1,0 +1,20 @@
+{
+    "EnginePath": "models/yolov5_gtz_small.engine",
+	"WeightsPath": "models/yolov5_gtz_small.wts",
+    "Width": 960,
+    "Height": 544,
+    "Channel": 3,
+    "NumAnchor":3,
+	"MaxOutputBBoxCount": 1000,
+    "ReturnMultiBox": true,
+	"IsGlobalNMS": true,
+	"ShowClassIds": [1, 0],
+    "ClassName":  ["snd", "gtz"],
+    "ConfThresh": 0.4,
+    "NMSThresh": 0.2,
+	"IgnoreThresh": 0.1,
+	"DepthMultiple": 0.33,
+	"WidthMultiple": 0.5,
+	"InputBlobName": "data", 
+	"OutputBlobName": "prob"
+}
