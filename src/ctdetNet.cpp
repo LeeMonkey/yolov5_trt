@@ -104,7 +104,7 @@ namespace ctdet
     
         mRuntime = createInferRuntime(gLogger);
         assert(mRuntime);
-        mFactory = std::make_shared<YoloPluginFactory>();
+        mFactory = std::make_shared<PluginFactory>();
         assert(mFactory);
         mEngine = mRuntime->deserializeCudaEngine(engineStream, size, mFactory.get());
         assert(mEngine);

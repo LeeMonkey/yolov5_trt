@@ -1,7 +1,9 @@
 #include <utils.h>
 #include <math.h>
 #include <common.h>
+#include <sys/stat.h>
 #include <memory>
+#include <sstream>
 
 #if 0
 cv::Mat preprocess_img(const cv::Mat& img, int input_w, int input_h, float& ratio,
@@ -62,8 +64,11 @@ cv::Mat preprocess_img(const cv::Mat& img, int input_w, int input_h, float& rati
                        right,
                        cv::BORDER_CONSTANT,
                        cv::Scalar(114, 114, 114));
-    new_image.convertTo(new_image, CV_32FC3, 1.f);
-
+#ifdef IS_NORM_IN_TENSORRT
+    new_image.convertTo(new_image, CV_32FC3, 1.);
+#else
+    new_image.convertTo(new_image, CV_32FC3, 1 / 255., 0);
+#endif
     return new_image;
 }
 
@@ -107,6 +112,62 @@ int read_files_in_dir(const char *p_dir_name, std::vector<std::string> &file_nam
 
     closedir(p_dir);
     return 0;
+}
+
+void get_image_target_in_dir(const std::string &image_dir_name, std::vector<std::pair<std::string, std::string> > &vecPath)
+{ 
+    DIR *dir=opendir(image_dir_name.c_str());
+    if(!dir)
+        return;
+
+    dirent *ent = nullptr;
+    while((ent=readdir(dir)) != nullptr)
+    {
+            if(strcmp(ent->d_name,".")==0||strcmp(ent->d_name,"..")==0)
+            {
+                continue;
+            }
+            std::string name{image_dir_name};
+            if(name.at(name.size() - 1) != '/')
+                name.append("/");
+            name.append(ent->d_name);
+            struct stat st;
+            stat(name.c_str(), &st);
+            if(S_ISDIR(st.st_mode))
+                get_image_target_in_dir(name, vecPath);
+            else
+            {
+                std::size_t idx = name.find("images");
+                if(idx != std::string::npos)
+                {
+                    std::string lname{name};
+                    lname.replace(idx, 6, "labels");
+                    std::size_t ext_idx = lname.find_last_of(".");
+                    if(ext_idx != std::string::npos)
+                    {
+                        lname.replace(lname.begin() + ext_idx + 1, lname.end(), "txt");
+                        if(isFileExists_access(lname.c_str()))
+                        {
+                            if(S_ISLNK(st.st_mode))
+                            {
+                                char buf[1024];
+                                int len = -1;
+                                if((len = readlink(name.c_str(), buf, 1024 - 1)) != -1)
+                                {
+                                    buf[len] = '\0';
+                                    name.assign(buf);
+                                    std::cout << buf << std::endl;
+                                    vecPath.emplace_back(name, lname);
+                                }
+                            }
+                            else
+                                vecPath.emplace_back(name, lname);
+                        }
+                    }
+                }
+            }
+    }       
+    closedir(dir);
 }
 
 void drawImg(const std::vector<Detection> &result, cv::Mat& img)
@@ -334,8 +395,8 @@ void postProcess(std::vector<Detection> &boxes, const int width, const int heigh
     if (!config.returnMultiBox)
     {
         std::sort(boxes.begin(), boxes.end(), [&width, &height](Detection &box1, Detection &box2){
-            return (std::pow(width / 2.f - box1.bbox[0], 2) + std::pow(height / 2.f - box1.bbox[0], 2)) 
-                < (std::pow(width / 2.f - box2.bbox[0], 2) + std::pow(height / 2.f - box2.bbox[0], 2));
+            return (std::pow(width / 2.f - box1.bbox[0], 2) + std::pow(height / 2.f - box1.bbox[1], 2)) 
+                < (std::pow(width / 2.f - box2.bbox[0], 2) + std::pow(height / 2.f - box2.bbox[1], 2));
         });
         boxes.erase(boxes.begin() + 1, boxes.end());
     }
@@ -344,20 +405,20 @@ void postProcess(std::vector<Detection> &boxes, const int width, const int heigh
 void nms(std::vector<Detection>& output, float conf_thresh, float nms_thresh) {
     ConfigManager &config = ConfigManager::getInstance();
 
-    std::map<float, std::vector<Detection>> m;
+    std::map<int, std::vector<Detection>> m;
 
     for(size_t i = 0; i < output.size() && i < config.maxOutputBBoxCount; ++i)
     {
         if(output.at(i).conf <= conf_thresh)
             continue;
 
+        int class_id = static_cast<int>(output.at(i).class_id);
         if(config.isGlobalNMS)
-            output.at(i).class_id = 0.f;
+            class_id = 0;
+        if(m.count(class_id) == 0)
+            m.emplace(class_id, std::vector<Detection>());
 
-        if(m.count(output.at(i).class_id) == 0)
-            m.emplace(output.at(i).class_id, std::vector<Detection>());
-
-        m[output.at(i).class_id].push_back(output.at(i));
+        m[class_id].push_back(output.at(i));
     }
     
     std::vector<Detection>().swap(output);
@@ -371,13 +432,20 @@ void nms(std::vector<Detection>& output, float conf_thresh, float nms_thresh) {
                       return a.conf > b.conf;
                   });
 
+        std::vector<bool> vecFlag(dets.size(), false);
         for (size_t m = 0; m < dets.size(); ++m) {
             auto& item = dets[m];
-            output.push_back(item);
+            if(!vecFlag.at(m)){
+                output.push_back(item);
+                vecFlag.at(m) = true;
+            }
+            else
+                continue;
             for (size_t n = m + 1; n < dets.size(); ++n) {
+                if(vecFlag.at(n))
+                    continue;
                 if (iou(item.bbox, dets[n].bbox) > nms_thresh) {
-                    dets.erase(dets.begin() + n);
-                    --n;
+                    vecFlag.at(n) = true;
                 }
             }
         }
@@ -392,33 +460,71 @@ void nms(std::vector<Detection>& res, float *output, float conf_thresh, float nm
     ConfigManager &config = ConfigManager::getInstance();
 
     int det_size = sizeof(Detection) / sizeof(float);
-    std::map<float, std::vector<Detection>> m;
+    std::map<int, std::vector<Detection>> m;
     for (size_t i = 0; i < output[0] && i < config.maxOutputBBoxCount; i++) {
         if (output[1 + det_size * i + 4] <= conf_thresh) continue;
         Detection det;
         memcpy(&det, &output[1 + det_size * i], det_size * sizeof(float));
 
+        int class_id = static_cast<int>(det.class_id);
         if(config.isGlobalNMS) {
-            det.class_id = 0.f;
+            class_id = 0;
         } 
 
-        if (m.count(det.class_id) == 0) 
-            m.emplace(det.class_id, std::vector<Detection>());
-        m[det.class_id].push_back(det);
+        if (m.count(class_id) == 0) 
+            m.emplace(class_id, std::vector<Detection>());
+        m[class_id].push_back(det);
     }
     for (auto it = m.begin(); it != m.end(); it++) {
         //std::cout << it->second[0].class_id << " --- " << std::endl;
         auto& dets = it->second;
         std::sort(dets.begin(), dets.end(), cmp);
+        std::vector<bool> vecFlag(dets.size(), false);
         for (size_t m = 0; m < dets.size(); ++m) {
             auto& item = dets[m];
-            res.push_back(item);
+            if(!vecFlag.at(m)){
+                res.push_back(item);
+                vecFlag.at(m) = true;
+            }
+            else
+                continue;
             for (size_t n = m + 1; n < dets.size(); ++n) {
+                if(vecFlag.at(n))
+                    continue;
                 if (iou(item.bbox, dets[n].bbox) > nms_thresh) {
-                    dets.erase(dets.begin() + n);
-                    --n;
+                    vecFlag.at(n) = true;
                 }
             }
+        }
+    }
+}
+
+void load_targets(const std::string &target_file, const cv::Size& size, std::vector<Detection>& targets)
+{
+    assert(isFileExists_access(target_file));
+    assert(targets.size() == 0);
+    std::ifstream ifs(target_file, std::ios::in);
+    std::string line;
+    while(getline(ifs, line))
+    {
+        std::istringstream label(line);
+        float classes = -1.f;
+        float cx = 0.f, cy = 0.f, w = 0.f, h = 0.f; 
+        std::string value;
+        label >> value; 
+        classes = std::stof(value);
+        label >> value;
+        cx = std::stof(value);
+        label >> value;
+        cy = std::stof(value);
+        label >> value;
+        w = std::stof(value);
+        label >> value;
+        h = std::stof(value);
+        if((classes + 1) > 1e-5)
+        {
+            Detection det{cx * size.width, cy * size.height, w * size.width, h * size.height, 0.f, classes};
+            targets.push_back(det);
         }
     }
 }

@@ -17,6 +17,8 @@ inline bool isFileExists_access(const std::string& name) {
 
 int read_files_in_dir(const char *p_dir_name, std::vector<std::string> &file_names);
 
+void get_image_target_in_dir(const std::string &image_dir_name, std::vector<std::pair<std::string, std::string> > &vecPath);
+
 void drawImg(const std::vector<Detection> & result, cv::Mat& img);
 
 void drawArrow(cv::Mat& img, 
@@ -37,5 +39,7 @@ void nms(std::vector<Detection>& output, float conf_thresh, float nms_thresh=0.5
 inline bool cmp(const Detection& a, const Detection& b);
 
 void nms(std::vector<Detection>& res, float *output, float conf_thresh, float nms_thresh = 0.5); 
+
+void load_targets(const std::string &target_file, const cv::Size& size, std::vector<Detection> &targets);
 
 #endif  // _YOLO_UTILS_H_

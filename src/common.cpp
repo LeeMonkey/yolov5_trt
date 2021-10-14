@@ -42,6 +42,15 @@ float iou(float lbox[4], float rbox[4]) {
         (std::max)(lbox[1] - lbox[3] / 2.f , rbox[1] - rbox[3] / 2.f), //top
         (std::min)(lbox[1] + lbox[3] / 2.f , rbox[1] + rbox[3] / 2.f), //bottom
     };
+#if 0
+    auto iter = std::begin(interBox);
+    while(iter != std::end(interBox))
+    {
+        std::cout << *iter << " ";
+        ++iter;
+    }
+    std::cout << std::endl;
+#endif
 
     if (interBox[2] > interBox[3] || interBox[0] > interBox[1])
         return 0.0f;
@@ -252,7 +261,7 @@ ILayer* bottleneck(INetworkDefinition *network, std::map<std::string, Weights>& 
 }
 
 ILayer* bottleneckCSP(INetworkDefinition *network, std::map<std::string, Weights>& weightMap, ITensor& input, int c1, int c2, int n, bool shortcut, int g, float e, std::string lname, DataType dataType) {
-    Weights emptywts{dataType, nullptr, 0 };
+    Weights emptywts{dataType, nullptr, 0};
     int c_ = (int)((float)c2 * e);
     auto cv1 = convBlock(network, weightMap, input, c_, 1, 1, 1, lname + ".cv1", dataType);
     auto cv2 = network->addConvolution(input, c_, DimsHW{ 1, 1 }, weightMap[lname + ".cv2.weight"], emptywts);
@@ -430,6 +439,7 @@ IPluginLayer* addYoLoLayer(INetworkDefinition *network, std::map<std::string, We
     }
 	YoloLayerPlugin *yolo_plugin = new YoloLayerPlugin(config.className.size(), config.width, config.height, config.maxOutputBBoxCount, kernels);
     auto yolo = network->addPluginExt(&input_tensors[0], input_tensors.size(), *yolo_plugin);
+    yolo->setName((lname + ".yolo_layer").c_str());
     return yolo;
 }
 

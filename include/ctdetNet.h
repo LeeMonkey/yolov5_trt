@@ -10,6 +10,7 @@
 #include <logging.h>
 #include <common.h>
 #include <network.h>
+#include <plugin_factory.h>
 
 namespace ctdet
 {
@@ -57,7 +58,7 @@ namespace ctdet
     
     	private:
     		IRuntime* mRuntime;
-    		std::shared_ptr<YoloPluginFactory> mFactory;
+    		std::shared_ptr<PluginFactory> mFactory;
     		ICudaEngine* mEngine;
     		IExecutionContext* mContext;
     		cudaStream_t mStream;

@@ -57,7 +57,7 @@ namespace nvinfer1
 
     private:
         void forwardGpu(const float* const* inputs, float *output, cudaStream_t stream, int batchSize = 1);
-        int mThreadCount = 256;
+        int mThreadCount = 512;
         const char* mPluginNamespace;
         int mKernelCount;
         int mClassCount;
@@ -66,12 +66,6 @@ namespace nvinfer1
         int mMaxOutObject;
         std::vector<YoloKernel> mYoloKernel;
         void** mAnchor;
-    };
-
-    class YoloPluginFactory: public IPluginFactory
-    {
-        public:
-            virtual IPlugin* createPlugin(const char* layerName, const void* serialData, size_t serialLength) override;
     };
 };
 #endif 

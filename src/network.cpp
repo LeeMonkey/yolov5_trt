@@ -3,6 +3,7 @@
 #include <cmath>
 #include <config.h>
 #include <network.h>
+#include <plugin_factory.h>
 
 //#define USE_FP16  // set USE_INT8 or USE_FP16 or USE_FP32
 
@@ -32,6 +33,7 @@ ICudaEngine* build_engine(unsigned int maxBatchSize, IBuilder* builder, DataType
 	shuffleLayer->setFirstTranspose(Permutation{2, 0, 1});
 	shuffleLayer->setName("shuffle_BGR2RGB");
 
+#ifdef IS_NORM_IN_TENSORRT 
 	float* scale = new float[1];
 	scale[0] = 1 / 255.;
 	Weights scalewts{DataType::kFLOAT, nullptr, 1};
@@ -45,11 +47,18 @@ ICudaEngine* build_engine(unsigned int maxBatchSize, IBuilder* builder, DataType
 
 	auto scale_input = network->addScale(*shuffleLayer->getOutput(0), ScaleMode::kUNIFORM, shiftwts, scalewts, powerwts);
 	scale_input->setName("scale_div255");
+#endif
 
     std::map<std::string, Weights> weightMap = loadWeights(wts_name);
 
     /* ------ yolov5 backbone------ */
+#ifdef IS_NORM_IN_TENSORRT
+    std::cout << "normalization in TensorRT" << std::endl;
     auto focus0 = focus(network, weightMap, *scale_input->getOutput(0), 3, get_width(64, gw), 3, "model.0");
+#else
+    std::cout << "normalization in opencv" << std::endl;
+    auto focus0 = focus(network, weightMap, *shuffleLayer->getOutput(0), 3, get_width(64, gw), 3, "model.0");
+#endif
     auto conv1 = convBlock(network, weightMap, *focus0->getOutput(0), get_width(128, gw), 3, 2, 1, "model.1");
     auto bottleneck_CSP2 = C3(network, weightMap, *conv1->getOutput(0), get_width(128, gw), get_width(128, gw), get_depth(3, gd), true, 1, 0.5, "model.2");
     auto conv3 = convBlock(network, weightMap, *bottleneck_CSP2->getOutput(0), get_width(256, gw), 3, 2, 1, "model.3");
@@ -63,6 +72,7 @@ ICudaEngine* build_engine(unsigned int maxBatchSize, IBuilder* builder, DataType
     auto bottleneck_csp9 = C3(network, weightMap, *spp8->getOutput(0), get_width(1024, gw), get_width(1024, gw), get_depth(3, gd), false, 1, 0.5, "model.9");
     auto conv10 = convBlock(network, weightMap, *bottleneck_csp9->getOutput(0), get_width(512, gw), 1, 1, 1, "model.10");
 
+#if 0
 	Weights emptywts{DataType::kFLOAT, nullptr, 0};
 	float *upsample11_val = new float[conv10->getOutput(0)->getDimensions().d[0] * 2 * 2];
 	for(int i = 0; i < conv10->getOutput(0)->getDimensions().d[0] * 2 * 2; ++i){
@@ -80,6 +90,11 @@ ICudaEngine* build_engine(unsigned int maxBatchSize, IBuilder* builder, DataType
 												emptywts);
 	upsample11->setStride(DimsHW{2, 2});
 	upsample11->setNbGroups(conv10->getOutput(0)->getDimensions().d[0]);
+#else
+    UpsampleLayerPlugin *upsampleLayerPlugin11 = new UpsampleLayerPlugin(2);
+    ITensor* inputTensors11[] = {conv10->getOutput(0)};
+    auto upsample11 = network->addPluginExt(inputTensors11, 1, *upsampleLayerPlugin11);
+#endif
 	upsample11->setName("upsample11");
 
     ITensor* inputTensors12[] = { upsample11->getOutput(0), bottleneck_csp6->getOutput(0) };
@@ -89,6 +104,7 @@ ICudaEngine* build_engine(unsigned int maxBatchSize, IBuilder* builder, DataType
     auto bottleneck_csp13 = C3(network, weightMap, *cat12->getOutput(0), get_width(1024, gw), get_width(512, gw), get_depth(3, gd), false, 1, 0.5, "model.13");
     auto conv14 = convBlock(network, weightMap, *bottleneck_csp13->getOutput(0), get_width(256, gw), 1, 1, 1, "model.14");
 
+#if 0
 	float* upsample15_val = new float[conv14->getOutput(0)->getDimensions().d[0] * 2 * 2];
 	for (int i = 0; i < conv14->getOutput(0)->getDimensions().d[0] * 2 * 2; ++i)
 		upsample15_val[i] = 1.f;
@@ -104,6 +120,11 @@ ICudaEngine* build_engine(unsigned int maxBatchSize, IBuilder* builder, DataType
 												emptywts);
 	upsample15->setStride(DimsHW{2, 2});
 	upsample15->setNbGroups(conv14->getOutput(0)->getDimensions().d[0]);
+#else
+    UpsampleLayerPlugin *upsampleLayerPlugin15 = new UpsampleLayerPlugin(2);
+    ITensor* inputTensors15[] = {conv14->getOutput(0)};
+    auto upsample15 = network->addPluginExt(inputTensors15, 1, *upsampleLayerPlugin15);
+#endif
 	upsample15->setName("upsample15");
 
     ITensor* inputTensors16[] = { upsample15->getOutput(0), bottleneck_csp4->getOutput(0) };
@@ -200,6 +221,7 @@ ICudaEngine* build_engine_p6(unsigned int maxBatchSize, IBuilder* builder, DataT
     /* ------ yolov5 head ------ */
     auto conv12 = convBlock(network, weightMap, *c3_11->getOutput(0), get_width(768, gw), 1, 1, 1, "model.12");
 
+#if 0
 	Weights emptywts{DataType::kFLOAT, nullptr, 0};
 	std::vector<float> upsample13_val(conv12->getOutput(0)->getDimensions().d[0] * 2 * 2, 1.0f);
 	Weights upsample13_wts{DataType::kFLOAT, 
@@ -212,6 +234,11 @@ ICudaEngine* build_engine_p6(unsigned int maxBatchSize, IBuilder* builder, DataT
 												emptywts);
 	upsample13->setStride(DimsHW{2, 2});
 	upsample13->setNbGroups(conv12->getOutput(0)->getDimensions().d[0]);
+#else
+    UpsampleLayerPlugin *upsampleLayerPlugin13 = new UpsampleLayerPlugin(2);
+    ITensor* inputTensors13[] = {conv12->getOutput(0)};
+    auto upsample13 = network->addPluginExt(inputTensors13, 1, *upsampleLayerPlugin13);
+#endif
 	upsample13->setName("upsample13");
 
 
@@ -221,6 +248,7 @@ ICudaEngine* build_engine_p6(unsigned int maxBatchSize, IBuilder* builder, DataT
 
     auto conv16 = convBlock(network, weightMap, *c3_15->getOutput(0), get_width(512, gw), 1, 1, 1, "model.16");
 	
+#if 0
 	std::vector<float> upsample17_val(conv16->getOutput(0)->getDimensions().d[0] * 2 * 2, 1.0f);
 	Weights upsample17_wts{DataType::kFLOAT, 
 		                   const_cast<const float*>(upsample17_val.data()), 
@@ -232,6 +260,11 @@ ICudaEngine* build_engine_p6(unsigned int maxBatchSize, IBuilder* builder, DataT
 												emptywts);
 	upsample17->setStride(DimsHW{2, 2});
 	upsample17->setNbGroups(conv16->getOutput(0)->getDimensions().d[0]);
+#else
+    UpsampleLayerPlugin *upsampleLayerPlugin17 = new UpsampleLayerPlugin(2);
+    ITensor* inputTensors17[] = {conv16->getOutput(0)};
+    auto upsample17 = network->addPluginExt(inputTensors17, 1, *upsampleLayerPlugin17);
+#endif
 	upsample17->setName("upsample17");
 
     ITensor* inputTensors18[] = { upsample17->getOutput(0), c3_6->getOutput(0) };
@@ -240,6 +273,7 @@ ICudaEngine* build_engine_p6(unsigned int maxBatchSize, IBuilder* builder, DataT
 
     auto conv20 = convBlock(network, weightMap, *c3_19->getOutput(0), get_width(256, gw), 1, 1, 1, "model.20");
 
+#if 0
 	std::vector<float> upsample21_val(conv20->getOutput(0)->getDimensions().d[0] * 2 * 2, 1.0f);
 	Weights upsample21_wts{DataType::kFLOAT, 
 		                   const_cast<const float*>(upsample21_val.data()), 
@@ -251,6 +285,11 @@ ICudaEngine* build_engine_p6(unsigned int maxBatchSize, IBuilder* builder, DataT
 												emptywts);
 	upsample21->setStride(DimsHW{2, 2});
 	upsample21->setNbGroups(conv20->getOutput(0)->getDimensions().d[0]);
+#else
+    UpsampleLayerPlugin *upsampleLayerPlugin21 = new UpsampleLayerPlugin(2);
+    ITensor* upsampleTensors21[] = {conv20->getOutput(0)};
+    auto upsample21 = network->addPluginExt(upsampleTensors21, 1, *upsampleLayerPlugin21);
+#endif
 	upsample21->setName("upsample21");
 
     ITensor* inputTensors21[] = { upsample21->getOutput(0), c3_4->getOutput(0) };

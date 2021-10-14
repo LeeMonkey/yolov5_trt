@@ -27,6 +27,28 @@ bool parse_args(int argc, char** argv, std::string& wtsName, std::string& engine
     return true;
 }
 
+void writeBoxes(const std::vector<Detection> &boxes, std::ostringstream &oss){
+    auto box = boxes.begin();
+    while(box != boxes.end())
+    {
+        float xmin = box->bbox[0] - box->bbox[2] / 2.f;
+        float ymin = box->bbox[1] - box->bbox[3] / 2.f;
+        float xmax = xmin + box->bbox[2];
+        float ymax = ymin + box->bbox[3];
+        oss << "["
+            << static_cast<int>(box->class_id) << ", "
+            << xmin << ", "
+            << ymin << ", "
+            << xmax << ", "
+            << ymax << ", "
+            << box->conf << "]";
+        if(box != (boxes.end() - 1))
+            oss << ", ";
+        ++box;
+    }
+}
+float sigmoid(float data){return 1. / (1. + exp(-data));}
+
 int main(int argc, char** argv)
 {
     std::string wtsName{""};
@@ -62,59 +84,100 @@ int main(int argc, char** argv)
                       << "`" << std::endl;
             return -1;
         }
-        for(int i = 0; i < 1; ++i){
-            std::ifstream ifs(image_list_path, std::ios::out);
-            std::string image_path;
-
-            while(getline(ifs, image_path))
-            {
-                cv::Mat image = cv::imread(image_path);
-                std::vector<Detection> boxes;
-                cudaDeviceSynchronize();
-                auto start = std::chrono::system_clock::now();
-                detector.forward(image, boxes);
-                cudaDeviceSynchronize();
-                auto end = std::chrono::system_clock::now();
-                std::cout << "inference time: "
-                    << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
-                    << "ms" << std::endl;
-                for(const auto& box: boxes)
-                {
 #if 0
-                    std::cout << std::setprecision(2) 
-                              << "conf: " << box.conf
-                              << " class_id" << box.class_id
-                              << " bbox: ["
-                              << box.bbox[0] << ", "
-                              << box.bbox[1] << ", "
-                              << box.bbox[2] << ", "
-                              << box.bbox[3] << "]"
-                              << std::endl;
-#endif
-                    float xmin = box.bbox[0] - box.bbox[2] / 2.f;
-                    float ymin = box.bbox[1] - box.bbox[3] / 2.f;
-                    float xmax = xmin + box.bbox[2];
-                    float ymax = ymin + box.bbox[3];
-                    cv::rectangle(image,
-                                  cv::Point(xmin, ymin),
-                                  cv::Point(xmax, ymax),
-                                  box.class_id == 0 ? cv::Scalar(0, 50, 250): cv::Scalar(50, 250, 0));
+        std::vector<std::pair<std::string, std::string>> vecImageLabelPath;
+        get_image_target_in_dir(image_list_path, vecImageLabelPath);
+        std::ofstream ofs("results.txt", std::ofstream::out);
+        assert(ofs.is_open());
+        std::ostringstream oss;
+        for(const auto &item:vecImageLabelPath)
+        {
+            cv::Mat image = cv::imread(item.first);
+            if(image.cols == image.rows)
+                continue;
+            std::vector<Detection> boxes;
+            detector.forward(image, boxes);
+            cudaDeviceSynchronize();
+            std::vector<Detection> targets;
+            load_targets(item.second, cv::Size(image.cols, image.rows), targets);
+            oss << "{\"predict\":[";
+            writeBoxes(boxes, oss);
+            oss << "], ";
+            oss << "\"target\":[";
+            writeBoxes(targets, oss);
+            oss << "]}";
+            ofs << oss.str() << std::endl;
+            oss.str("");
+            if(boxes.size() == 0)
+                std::cout << item.first << std::endl;
+            for(const auto& box: boxes)
+            {
+                float xmin = box.bbox[0] - box.bbox[2] / 2.f;
+                float ymin = box.bbox[1] - box.bbox[3] / 2.f;
+                float xmax = xmin + box.bbox[2];
+                float ymax = ymin + box.bbox[3];
+                cv::rectangle(image,
+                              cv::Point(xmin, ymin),
+                              cv::Point(xmax, ymax),
+                              box.class_id == 0 ? cv::Scalar(0, 50, 250): cv::Scalar(50, 250, 0));
 
-                    cv::putText(image, 
-                                config.className[static_cast<int>(box.class_id)],
-                                cv::Point(xmin, ymin - 1),
-                                cv::FONT_HERSHEY_PLAIN,
-                                1,
-                                cv::Scalar(250, 250, 250));
-                }
-                size_t nIndex = image_path.rfind("/");
-                std::string image_name {image_path};
-                if (nIndex != std::string::npos)
-                    image_name = image_name.substr(nIndex + 1);
-                cv::imwrite("results/" + image_name, image);
-                std::cout << std::string(60, '#') << std::endl;
+                cv::putText(image, 
+                            config.className[static_cast<int>(box.class_id)],
+                            cv::Point(xmin, ymin - 1),
+                            cv::FONT_HERSHEY_PLAIN,
+                            1,
+                            cv::Scalar(250, 250, 250));
             }
+            size_t nIndex = item.first.rfind("/");
+            std::string image_name{item.first};
+            if (nIndex != std::string::npos)
+                image_name = item.first.substr(nIndex + 1);
+            cv::imwrite("results/" + image_name, image);
         }
+        ofs.close();
+#else
+
+        std::ifstream ifs(image_list_path, std::ios::out);
+        std::string image_path;
+
+        while(getline(ifs, image_path))
+        {
+            cv::Mat image = cv::imread(image_path);
+            std::vector<Detection> boxes;
+            cudaDeviceSynchronize();
+            auto start = std::chrono::system_clock::now();
+            detector.forward(image, boxes);
+            cudaDeviceSynchronize();
+            auto end = std::chrono::system_clock::now();
+            std::cout << "inference time: "
+                << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
+                << "ms" << std::endl;
+            for(const auto& box: boxes)
+            {
+                float xmin = box.bbox[0] - box.bbox[2] / 2.f;
+                float ymin = box.bbox[1] - box.bbox[3] / 2.f;
+                float xmax = xmin + box.bbox[2];
+                float ymax = ymin + box.bbox[3];
+                cv::rectangle(image,
+                              cv::Point(xmin, ymin),
+                              cv::Point(xmax, ymax),
+                              box.class_id == 0 ? cv::Scalar(0, 50, 250): cv::Scalar(50, 250, 0));
+
+                cv::putText(image, 
+                            config.className[static_cast<int>(box.class_id)],
+                            cv::Point(xmin, ymin - 1),
+                            cv::FONT_HERSHEY_PLAIN,
+                            1,
+                            cv::Scalar(250, 250, 250));
+            }
+            size_t nIndex = image_path.rfind("/");
+            std::string image_name {image_path};
+            if (nIndex != std::string::npos)
+                image_name = image_name.substr(nIndex + 1);
+            cv::imwrite("results/" + image_name, image);
+            std::cout << std::string(60, '-') << std::endl;
+        }
+#endif
     }
 }
 

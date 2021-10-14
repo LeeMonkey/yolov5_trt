@@ -55,6 +55,8 @@ int main(int argc, char** argv)
                            cv::Size(width, height),
                            true);
 	size_t num_interations = 0;
+    long totalTime = 0;
+    int nFrame = 0;
     while(cap.isOpened())
     {
         cv::Mat image;
@@ -65,14 +67,17 @@ int main(int argc, char** argv)
 
         std::vector<Detection> boxes;
         cudaDeviceSynchronize();
-        auto start = std::chrono::system_clock::now();
+        auto start = std::chrono::steady_clock::now();
 		//image.setTo(cv::Scalar(1.0f, 1.0f, 1.0f));
         detector.forward(image, boxes);
         cudaDeviceSynchronize();
-        auto end = std::chrono::system_clock::now();
+        auto end = std::chrono::steady_clock::now();
+        int curTime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
         std::cout << "inference time: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
+            << curTime 
             << "ms" << std::endl;
+        totalTime += curTime;
+        ++nFrame;
         for(const auto& box: boxes)
         {
             float xmin = box.bbox[0] - box.bbox[2] / 2.f;
@@ -101,6 +106,10 @@ int main(int argc, char** argv)
 
         std::cout << std::string(60, '#') << std::endl;
     }
+    std::cout << "Total Time: " 
+              << totalTime << "ms | "
+              << "Mean Time: "
+              << totalTime * 1.0 / nFrame << "ms" << std::endl; 
 	detector.printLayerTimes(num_interations);
     cap.release();
 }

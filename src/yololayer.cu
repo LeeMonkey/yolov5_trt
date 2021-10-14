@@ -4,7 +4,7 @@
 #include <memory>
 #include <yololayer.h>
 #include <cuda_utils.h>
-
+#if 0
 namespace Tn
 {
     template<typename T> 
@@ -21,6 +21,7 @@ namespace Tn
         buffer += sizeof(T);
     }
 }
+#endif
 
 namespace nvinfer1
 {
@@ -92,7 +93,7 @@ namespace nvinfer1
 
     bool YoloLayerPlugin::supportsFormat(DataType type, PluginFormat format) const
     {
-        return (type == DataType::kFLOAT || type == DataType::kHALF) && format == PluginFormat::kNCHW;
+        return type == DataType::kFLOAT && format == PluginFormat::kNCHW;
     }
 
     void YoloLayerPlugin::serialize(void* buffer)
@@ -186,8 +187,8 @@ namespace nvinfer1
             det->bbox[3] = 2.0f * Logist(curInput[idx + k * info_len_i * total_grid + 3 * total_grid]);
             det->bbox[3] = det->bbox[3] * det->bbox[3] * anchors[2 * k + 1];
             det->conf = box_prob * max_cls_prob;
-            det->conf = box_prob;
-            //det->class_id = class_id;
+            //det->conf = box_prob;
+            det->class_id = class_id;
         }
     }
 
@@ -217,11 +218,13 @@ namespace nvinfer1
         forwardGpu((const float* const*)inputs, (float*)outputs[0], stream, batchSize);
         return 0;
     }
+#if 0
 	IPlugin* YoloPluginFactory::createPlugin(const char* layerName, const void* serialData, size_t serialLength)
 	{
 		YoloLayerPlugin *ylp =  new YoloLayerPlugin(layerName, serialData, serialLength);
 		return ylp;
 	}
+#endif
 
     /*
     IPluginExt* YoloPluginCreator::createPlugin(const char* name, const PluginFieldCollection* fc)
